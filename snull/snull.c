@@ -32,6 +32,7 @@
 #include <linux/ip.h>          /* struct iphdr */
 #include <linux/tcp.h>         /* struct tcphdr */
 #include <linux/skbuff.h>
+#include <linux/version.h>
 
 #include "snull.h"
 
@@ -68,7 +69,7 @@ struct snull_packet {
 	u8 data[ETH_DATA_LEN];
 };
 
-int pool_size = 8;
+int pool_size = 256;
 module_param(pool_size, int, 0);
 
 /*
@@ -138,11 +139,12 @@ struct snull_packet *snull_get_tx_buffer(struct net_device *dev)
     
 	spin_lock_irqsave(&priv->lock, flags);
 	pkt = priv->ppool;
-	priv->ppool = pkt->next;
 	if (priv->ppool == NULL) {
 		printk (KERN_INFO "Pool empty\n");
 		netif_stop_queue(dev);
 	}
+	else
+		priv->ppool = pkt->next;
 	spin_unlock_irqrestore(&priv->lock, flags);
 	return pkt;
 }
@@ -203,6 +205,7 @@ static void snull_rx_ints(struct net_device *dev, int enable)
 int snull_open(struct net_device *dev)
 {
 	/* request_region(), request_irq(), ....  (like fops->open) */
+	struct snull_priv *priv = netdev_priv(dev);
 
 	/* 
 	 * Assign the hardware address of the board: use "\0SNULx", where
@@ -212,13 +215,23 @@ int snull_open(struct net_device *dev)
 	memcpy(dev->dev_addr, "\0SNUL0", ETH_ALEN);
 	if (dev == snull_devs[1])
 		dev->dev_addr[ETH_ALEN-1]++; /* \0SNUL1 */
+	if (use_napi)
+		napi_enable(&priv->napi);
+
+	snull_rx_ints(dev, 1);		/* enable receive interrupts */
+
 	netif_start_queue(dev);
 	return 0;
 }
 
 int snull_release(struct net_device *dev)
 {
-    /* release ports, irq and such -- like fops->close */
+	/* release ports, irq and such -- like fops->close */
+	struct snull_priv *priv = netdev_priv(dev);
+
+	snull_rx_ints(dev, 0);		/* disable receive interrupts */
+	if (use_napi)
+		napi_disable(&priv->napi);
 
 	netif_stop_queue(dev); /* can't transmit any more */
 	return 0;
@@ -280,7 +293,6 @@ void snull_rx(struct net_device *dev, struct snull_packet *pkt)
   out:
 	return;
 }
-    
 
 /*
  * The poll implementation.
@@ -295,8 +307,11 @@ static int snull_poll(struct napi_struct *napi, int budget)
     
 	priv = container_of(napi, struct snull_priv, napi);
 	dev = priv->dev;
+	//while (npackets < budget) {
 	while (npackets < budget && priv->rx_queue) {
 		pkt = snull_dequeue_buf(dev);
+		if (pkt == NULL) 
+			goto complete;
 		skb = dev_alloc_skb(pkt->datalen + 2);
 		if (! skb) {
 			if (printk_ratelimit())
@@ -319,7 +334,8 @@ static int snull_poll(struct napi_struct *napi, int budget)
 		snull_release_buffer(pkt);
 	}
 	/* If we processed all packets, we're done; tell the kernel and reenable ints */
-	if (! priv->rx_queue) {
+	if (! priv->rx_queue || npackets >= budget) {
+complete:
 		napi_complete(napi);
 		snull_rx_ints(dev, 1);
 	}
@@ -482,6 +498,8 @@ static void snull_hw_tx(char *buf, int len, struct net_device *dev)
 	dest = snull_devs[dev == snull_devs[0] ? 1 : 0];
 	priv = netdev_priv(dest);
 	tx_buffer = snull_get_tx_buffer(dev);
+	if(tx_buffer == NULL)
+		return;
 	tx_buffer->datalen = len;
 	memcpy(tx_buffer->data, buf, len);
 	snull_enqueue_buf(dest, tx_buffer);
@@ -674,7 +692,7 @@ void snull_init(struct net_device *dev)
 
 	dev->watchdog_timeo = timeout;
 	if (use_napi) {
-		netif_napi_add(dev, &priv->napi, snull_poll, 2);
+		netif_napi_add(dev, &priv->napi, snull_poll, 8);
 	}
 
 	/* keep the default flags, just add NOARP */
@@ -683,7 +701,6 @@ void snull_init(struct net_device *dev)
 	dev->netdev_ops = &snull_netdev_ops;
 	dev->header_ops = &snull_header_ops;
 
-	snull_rx_ints(dev, 1);		/* enable receive interrupts */
 	snull_setup_pool(dev);
 }
 
@@ -702,10 +719,14 @@ struct net_device *snull_devs[2];
 void snull_cleanup(void)
 {
 	int i;
+	struct snull_priv *priv;
     
 	for (i = 0; i < 2;  i++) {
 		if (snull_devs[i]) {
+			priv = netdev_priv(snull_devs[i]);
 			unregister_netdev(snull_devs[i]);
+			if (use_napi)
+				netif_napi_del(&priv->napi);
 			snull_teardown_pool(snull_devs[i]);
 			free_netdev(snull_devs[i]);
 		}
@@ -723,9 +744,15 @@ int snull_init_module(void)
 	snull_interrupt = use_napi ? snull_napi_interrupt : snull_regular_interrupt;
 
 	/* Allocate the devices */
-	snull_devs[0] = alloc_netdev(sizeof(struct snull_priv), "sn%d", NET_NAME_UNKNOWN,
+	snull_devs[0] = alloc_netdev(sizeof(struct snull_priv), "sn%d",
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 17, 0))
+			NET_NAME_UNKNOWN,
+#endif
 			snull_init);
-	snull_devs[1] = alloc_netdev(sizeof(struct snull_priv), "sn%d", NET_NAME_UNKNOWN,
+	snull_devs[1] = alloc_netdev(sizeof(struct snull_priv), "sn%d",
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 17, 0))
+			NET_NAME_UNKNOWN,
+#endif
 			snull_init);
 	if (snull_devs[0] == NULL || snull_devs[1] == NULL)
 		goto out;
