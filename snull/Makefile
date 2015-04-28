@@ -4,7 +4,7 @@
 
 # Add your debugging flag (or not) to EXTRA_CFLAGS
 ifeq ($(DEBUG),y)
-  DEBFLAGS = -O -g -DSBULL_DEBUG # "-O" is needed to expand inlines
+  DEBFLAGS = -O -g -DSNULL_DEBUG # "-O" is needed to expand inlines
 else
   DEBFLAGS = -O2
 endif
