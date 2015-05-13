@@ -32,6 +32,7 @@
 #include <linux/ip.h>          /* struct iphdr */
 #include <linux/tcp.h>         /* struct tcphdr */
 #include <linux/skbuff.h>
+#include <linux/version.h>
 
 #include "snull.h"
 
@@ -292,7 +293,6 @@ void snull_rx(struct net_device *dev, struct snull_packet *pkt)
   out:
 	return;
 }
-    
 
 /*
  * The poll implementation.
@@ -744,8 +744,16 @@ int snull_init_module(void)
 	snull_interrupt = use_napi ? snull_napi_interrupt : snull_regular_interrupt;
 
 	/* Allocate the devices */
-	snull_devs[0] = alloc_netdev(sizeof(struct snull_priv), "sn%d", snull_init);
-	snull_devs[1] = alloc_netdev(sizeof(struct snull_priv), "sn%d", snull_init);
+	snull_devs[0] = alloc_netdev(sizeof(struct snull_priv), "sn%d",
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 17, 0))
+			NET_NAME_UNKNOWN,
+#endif
+			snull_init);
+	snull_devs[1] = alloc_netdev(sizeof(struct snull_priv), "sn%d",
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 17, 0))
+			NET_NAME_UNKNOWN,
+#endif
+			snull_init);
 	if (snull_devs[0] == NULL || snull_devs[1] == NULL)
 		goto out;
 
