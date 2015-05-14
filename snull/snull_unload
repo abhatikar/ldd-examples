@@ -3,3 +3,5 @@
 /sbin/ifconfig sn0 down
 /sbin/ifconfig sn1 down
 /sbin/rmmod snull
+/sbin/rmmod snull_debug_skb
+echo "" > /sys/kernel/debug/tracing/trace

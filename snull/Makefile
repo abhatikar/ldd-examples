@@ -15,7 +15,7 @@ EXTRA_CFLAGS += -I..
 ifneq ($(KERNELRELEASE),)
 # call from kernel build system
 
-obj-m	:= snull.o
+obj-m	:= snull.o snull_debug_skb.o
 
 else
 

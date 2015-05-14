@@ -3,6 +3,9 @@
 export PATH=/sbin:/bin
 
 # Use a pathname, as new modutils don't look in the current dir by default
-insmod ./snull.ko $*
-ifconfig sn0 local0
-ifconfig sn1 local1
+insmod ./snull_debug_skb.ko
+insmod ./snull.ko use_napi=1 $*
+ifconfig sn0 192.168.0.1 up
+ifconfig sn1 192.168.1.2 up
+sleep 4
+echo "" > /sys/kernel/debug/tracing/trace

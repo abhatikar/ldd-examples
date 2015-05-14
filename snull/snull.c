@@ -42,7 +42,7 @@
 MODULE_AUTHOR("Alessandro Rubini, Jonathan Corbet");
 MODULE_LICENSE("Dual BSD/GPL");
 
-
+extern void snull_dump_skb(const struct sk_buff *skb, char* message);
 /*
  * Transmitter lockup simulation, normally disabled.
  */
@@ -325,6 +325,7 @@ static int snull_poll(struct napi_struct *napi, int budget)
 		skb->dev = dev;
 		skb->protocol = eth_type_trans(skb, dev);
 		skb->ip_summed = CHECKSUM_UNNECESSARY; /* don't check it */
+		snull_dump_skb(skb, "RECEIVE");
 		netif_receive_skb(skb);
 		
         	/* Maintain stats */
@@ -507,7 +508,6 @@ static void snull_hw_tx(char *buf, int len, struct net_device *dev)
 		priv->status |= SNULL_RX_INTR;
 		snull_interrupt(0, dest, NULL);
 	}
-
 	priv = netdev_priv(dev);
 	priv->tx_packetlen = len;
 	priv->tx_packetdata = buf;
@@ -544,6 +544,7 @@ int snull_tx(struct sk_buff *skb, struct net_device *dev)
 	/* Remember the skb, so we can free it at interrupt time */
 	priv->skb = skb;
 
+	snull_dump_skb(skb, "SENT");
 	/* actual deliver of data is device-specific, and not shown here */
 	snull_hw_tx(data, len, dev);
 
