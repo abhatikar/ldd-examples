@@ -273,7 +273,7 @@ void snull_rx(struct net_device *dev, struct snull_packet *pkt)
 	 * The packet has been retrieved from the transmission
 	 * medium. Build an skb around it, so upper layers can handle it
 	 */
-	skb = dev_alloc_skb(pkt->datalen + 2);
+	skb = netdev_alloc_skb(dev, pkt->datalen + 2);
 	if (!skb) {
 		if (printk_ratelimit())
 			printk(KERN_NOTICE "snull rx: low on mem - packet dropped\n");
